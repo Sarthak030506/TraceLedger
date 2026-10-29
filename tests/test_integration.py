@@ -4,6 +4,8 @@ import pytest
 
 from sidecar.collector import ingest_many, sample_events
 from sidecar.storage import RecordStore
+from integrity.merkle import build_merkle_tree
+from integrity.verifier import verify_batch
 
 
 def test_sidecar_ingest_and_hash_records():
@@ -31,18 +33,8 @@ def test_sidecar_ingest_and_hash_records():
     store.close()
 
 
-@pytest.mark.skip(reason="waiting for integrity module")
 def test_merkle_verification_and_tamper_detection():
-    """Outlines Merkle tree construction, batch verification, and tamper detection.
-
-    Steps:
-      1. Ingest sample events into an in-memory RecordStore.
-      2. Extract 64-character lowercase SHA-256 hashes in sequence order.
-      3. Build Merkle tree using integrity.merkle.build_merkle_tree(hashes).
-      4. Verify batch using integrity.verifier.verify_batch(full_records, expected_root).
-      5. Tamper with one stored record in SQLite.
-      6. Assert that verify_batch fails on the tampered dataset.
-    """
+    """Merkle tree construction, batch verification, and tamper detection."""
     store = RecordStore(":memory:")
     ingest_many(sample_events(), store)
 
@@ -51,28 +43,26 @@ def test_merkle_verification_and_tamper_detection():
     record_hashes = [r["record_hash"] for r in hash_records]
     assert len(record_hashes) == 5
 
-    # 2. Build Merkle tree (deferred to Person 2)
-    # from integrity.merkle import build_merkle_tree
-    # tree = build_merkle_tree(record_hashes)
-    # expected_root = tree["merkle_root"]
-    # assert len(expected_root) == 64
+    # 2. Build Merkle tree
+    tree = build_merkle_tree(record_hashes)
+    expected_root = tree["merkle_root"]
+    assert len(expected_root) == 64
 
     # 3. Batch verification succeeds on unaltered records
-    # from integrity.verifier import verify_batch
-    # full_records = store.get_records()
-    # verification = verify_batch(full_records, expected_root)
-    # assert verification["verified"] is True
-    # assert verification["computed_root"] == expected_root
-    # assert verification["errors"] == []
+    full_records = store.get_records()
+    verification = verify_batch(full_records, expected_root)
+    assert verification["verified"] is True
+    assert verification["computed_root"] == expected_root
+    assert verification["errors"] == []
 
     # 4. Tamper with one stored record
-    # store.conn.execute(
-    #     "UPDATE records SET details_json = ? WHERE sequence_number = 1",
-    #     (json.dumps({"tampered": True}),)
-    # )
-    # tampered_records = store.get_records()
-    # tampered_res = verify_batch(tampered_records, expected_root)
-    # assert tampered_res["verified"] is False
-    # assert len(tampered_res["errors"]) > 0
+    store.conn.execute(
+        "UPDATE records SET details_json = ? WHERE sequence_number = 1",
+        (json.dumps({"tampered": True}),)
+    )
+    tampered_records = store.get_records()
+    tampered_res = verify_batch(tampered_records, expected_root)
+    assert tampered_res["verified"] is False
+    assert len(tampered_res["errors"]) > 0
 
     store.close()
