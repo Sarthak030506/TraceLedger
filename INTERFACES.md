@@ -8,21 +8,43 @@ This document formalizes the agreed contracts, data schemas, and API interfaces 
 
 The sidecar agent captures security events, sanitizes sensitive data, assigns sequential numbers, deterministically serializes records, and computes a SHA-256 hash.
 
-### Record Schema
+### Timestamps
+All timestamps across the entire pipeline must be whole-second UTC ISO-8601 strings in the exact format:
+`YYYY-MM-DDTHH:MM:SSZ` (e.g., `2026-10-29T12:00:00Z`). The sidecar normalizes all ingested timestamps to this format; microseconds and local timezone offsets are not permitted.
 
-Each processed event output by Person 1 must adhere to this JSON structure:
+### Record Shapes
+
+The off-chain storage layer (`RecordStore`) exposes two distinct record shapes:
+
+#### a) Full Stored Record (`RecordStore.get_records`)
+Returned by `RecordStore.get_records(start, end)`. This contains the complete, sanitized event payload used during batch verification and audit inspections. Notice that `record_hash` is **NOT** included in the hashed data:
 
 ```json
 {
   "event_id": "evt-001a2b3c",
   "sequence_number": 1,
-  "timestamp": "2026-10-29T12:00:00.000000Z",
-  "event_type": "authentication_success",
+  "timestamp": "2026-10-29T12:00:00Z",
+  "event_type": "authentication",
   "source": "auth-service",
   "details": {
-    "user": "alice",
-    "ip_address": "192.168.1.10"
-  },
+    "ip": "192.168.1.xxx",
+    "result": "success",
+    "user": "alice"
+  }
+}
+```
+
+- **Canonical JSON Hashing Form:** Deterministic JSON serialization of exactly these 6 keys (`event_id`, `sequence_number`, `timestamp`, `event_type`, `source`, `details`), sorted alphabetically at every level, separators `(",", ":")`, UTF-8 encoded without spaces. `record_hash` is NOT part of the hashed data.
+
+#### b) Hash Record (`RecordStore.get_hash_records`)
+Returned by `RecordStore.get_hash_records(start, end)`. This is the lightweight record consumed by Person 2 to construct Merkle trees:
+
+```json
+{
+  "event_id": "evt-001a2b3c",
+  "sequence_number": 1,
+  "timestamp": "2026-10-29T12:00:00Z",
+  "event_type": "authentication",
   "record_hash": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
 }
 ```
@@ -31,23 +53,16 @@ Each processed event output by Person 1 must adhere to this JSON structure:
 - **Algorithm:** SHA-256
 - **Format:** Lowercase hexadecimal string (64 characters)
 - **Prefix:** **NO `0x` prefix**
-- **Canonical Serialization:** Deterministic JSON serialization (sorted keys, no extraneous whitespace, UTF-8 encoded) before hashing.
-- **Minimal Required Fields for downstream verification:**
-  ```json
-  {
-    "event_id": "string",
-    "sequence_number": 1,
-    "timestamp": "ISO-8601 string",
-    "event_type": "string",
-    "record_hash": "64-char lowercase hex SHA-256"
-  }
-  ```
 
 ---
 
 ## 2. Person 2 (Integrity & Cryptography) Module Contract
 
 The integrity layer groups record hashes into a Merkle tree, generates inclusion proofs, handles cryptographic signatures (Ed25519), and performs verification.
+
+Merkle leaves are the record_hash values from the sidecar, in sequence_number order. Do not hash them again to make leaves.
+
+verify_batch receives full records (get_records), recomputes each hash with sidecar.hasher.hash_record, then rebuilds the root.
 
 ### Core Function Signatures
 
@@ -90,24 +105,26 @@ def verify_inclusion(record_hash: str, proof: list[dict], expected_root: str) ->
 def verify_batch(records: list[dict], expected_root: str) -> dict:
     """
     Recomputes hashes and Merkle root from retained records and verifies against expected root.
+    verify_batch receives full records (get_records), recomputes each hash with sidecar.hasher.hash_record, then rebuilds the root.
     
     Args:
-        records: Ordered list of record dictionaries.
+        records: Ordered list of full record dictionaries (from RecordStore.get_records).
         expected_root: 64-character lowercase hex string.
         
     Returns:
         {
             "verified": bool,
             "expected_root": str,
-            "calculated_root": str,
+            "computed_root": str,
             "record_count": int,
-            "errors": list[str]      # List of tampering or mismatch details if verified is False
+            "errors": list[str],
+            "message": str
         }
     """
 ```
 
 ### Merkle Tree Specification Rules
-- **Leaf hashing:** `hash(record_bytes)` produces the initial leaf hash (64-char hex).
+- **Leaf hashing:** Merkle leaves are the record_hash values from the sidecar, in sequence_number order. Do not hash them again to make leaves.
 - **Internal node hashing:** Pairs of nodes are concatenated and hashed: `SHA256(left_node_bytes + right_node_bytes)`.
 - **Odd leaf handling:** If a tree level has an odd number of leaves, **duplicate the last leaf** to form the final pair before hashing up to the parent level.
 
@@ -129,6 +146,9 @@ Person 3 manages off-chain persistence, exposes FastAPI endpoints, and anchors b
 }
 ```
 
+### Signature Handling & On-Chain Protection
+Signature: stored on-chain for reference only. The contract does NOT verify Ed25519; the real on-chain protection is the owner-only access control. Signature verification happens off-chain in integrity/signer.py.
+
 ### Blockchain / Solidity Formatting Rules
 - **Hex Prefix Handling:**
   - In internal Python logic, off-chain storage, and REST API payloads: **No `0x` prefix** (lowercase 64-char hex strings).
@@ -148,9 +168,9 @@ Person 3 manages off-chain persistence, exposes FastAPI endpoints, and anchors b
 
 ## Summary of Cross-Module Conventions
 
-| Layer / Context | Hash / Root Format | `0x` Prefix? | Case |
-|---|---|---|---|
-| Sidecar (Person 1) | SHA-256 Hex | No | lowercase |
-| Integrity Engine (Person 2) | SHA-256 Hex | No | lowercase |
-| Backend & REST API (Person 3) | SHA-256 Hex | No | lowercase |
-| Web3 / Smart Contract (Person 3) | `bytes32` Hex | **Yes (`0x...`)** | lowercase |
+| Layer / Context | Hash / Root Format | `0x` Prefix? | Case | Timestamps |
+|---|---|---|---|---|
+| Sidecar (Person 1) | SHA-256 Hex | No | lowercase | UTC `YYYY-MM-DDTHH:MM:SSZ` |
+| Integrity Engine (Person 2) | SHA-256 Hex | No | lowercase | UTC `YYYY-MM-DDTHH:MM:SSZ` |
+| Backend & REST API (Person 3) | SHA-256 Hex | No | lowercase | UTC `YYYY-MM-DDTHH:MM:SSZ` / Unix epoch |
+| Web3 / Smart Contract (Person 3) | `bytes32` Hex | **Yes (`0x...`)** | lowercase | Unix epoch integer |
