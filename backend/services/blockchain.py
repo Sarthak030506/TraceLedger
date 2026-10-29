@@ -82,7 +82,12 @@ class BlockchainService:
         private_key: str | None = None,
         chain_id: int | None = None,
     ):
-        self.rpc_url = rpc_url or os.environ.get("MST_RPC_URL") or os.environ.get("RPC_URL")
+        self.rpc_url = (
+            rpc_url
+            or os.environ.get("MST_RPC_URL")
+            or os.environ.get("RPC_URL")
+            or os.environ.get("SEPOLIA_RPC_URL")
+        )
         self.contract_address = contract_address or os.environ.get("CONTRACT_ADDRESS")
         self.private_key = private_key or os.environ.get("PRIVATE_KEY") or os.environ.get("TESTNET_PRIVATE_KEY")
         self.chain_id = chain_id or int(os.environ.get("CHAIN_ID", 0) or os.environ.get("MST_CHAIN_ID", 0))
