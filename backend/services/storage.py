@@ -14,6 +14,10 @@ def save_batch(batch_data: dict[str, Any], db_path: str | None = None) -> dict[s
     if ts is None:
         ts = int(datetime.now(timezone.utc).timestamp())
 
+    # Serialize optional record_hashes list for storage
+    record_hashes = batch_data.get("record_hashes")
+    record_hashes_json = json.dumps(record_hashes) if record_hashes is not None else None
+
     conn = get_connection(db_path)
     try:
         conn.execute(
@@ -21,8 +25,9 @@ def save_batch(batch_data: dict[str, Any], db_path: str | None = None) -> dict[s
             INSERT INTO batches (
                 batch_id, merkle_root, previous_root, first_sequence,
                 last_sequence, record_count, timestamp, signature,
-                transaction_hash, block_number, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                transaction_hash, block_number, status, created_at,
+                record_hashes_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 batch_data["batch_id"],
@@ -37,6 +42,7 @@ def save_batch(batch_data: dict[str, Any], db_path: str | None = None) -> dict[s
                 batch_data.get("block_number"),
                 batch_data.get("status", "confirmed"),
                 now_utc,
+                record_hashes_json,
             ),
         )
         conn.commit()

@@ -11,7 +11,7 @@ export async function fetchHealth() {
     const res = await fetch(`${API_BASE}/api/health`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
-  } catch (err) {
+  } catch (_err) {
     return {
       status: 'offline_mode',
       blockchain_connected: false,
@@ -29,19 +29,15 @@ export async function fetchBatches(limit = 50, offset = 0) {
     const res = await fetch(`${API_BASE}/api/batches?limit=${limit}&offset=${offset}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
-  } catch (err) {
-    // Deterministic mock fallback
+  } catch (_err) {
     return {
       batches: [
         {
           batch_id: 3,
           merkle_root: "9c3e41b2f8a70512e6d9b4c3a1f8e70512e6d9b4c3a1f8e70512e6d9b4c3a1f8",
           previous_root: "8b2d30a1e7f60401d5c8a3b2f0e7d60401d5c8a3b2f0e7d60401d5c8a3b2f0e7",
-          first_sequence: 11,
-          last_sequence: 15,
-          record_count: 5,
-          timestamp: 1729000200,
-          status: "confirmed",
+          first_sequence: 11, last_sequence: 15, record_count: 5,
+          timestamp: 1729000200, status: "confirmed",
           transaction_hash: "0x7f8a9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f90",
           block_number: 10003,
           created_at: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
@@ -50,11 +46,8 @@ export async function fetchBatches(limit = 50, offset = 0) {
           batch_id: 2,
           merkle_root: "8b2d30a1e7f60401d5c8a3b2f0e7d60401d5c8a3b2f0e7d60401d5c8a3b2f0e7",
           previous_root: "7a1c29f0d6e50390c4b792a1e9d6c50390c4b792a1e9d6c50390c4b792a1e9d6",
-          first_sequence: 6,
-          last_sequence: 10,
-          record_count: 5,
-          timestamp: 1729000100,
-          status: "confirmed",
+          first_sequence: 6, last_sequence: 10, record_count: 5,
+          timestamp: 1729000100, status: "confirmed",
           transaction_hash: "0x6e7d8c9b0a1f2e3d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0e1d2c3b4a5f6e7d",
           block_number: 10002,
           created_at: new Date(Date.now() - 1000 * 60 * 25).toISOString(),
@@ -63,11 +56,8 @@ export async function fetchBatches(limit = 50, offset = 0) {
           batch_id: 1,
           merkle_root: "7a1c29f0d6e50390c4b792a1e9d6c50390c4b792a1e9d6c50390c4b792a1e9d6",
           previous_root: "0000000000000000000000000000000000000000000000000000000000000000",
-          first_sequence: 1,
-          last_sequence: 5,
-          record_count: 5,
-          timestamp: 1729000000,
-          status: "confirmed",
+          first_sequence: 1, last_sequence: 5, record_count: 5,
+          timestamp: 1729000000, status: "confirmed",
           transaction_hash: "0x5d6c7b8a9f0e1d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0c1b2a3f4e5d6c",
           block_number: 10001,
           created_at: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
@@ -84,7 +74,7 @@ export async function fetchBatch(batchId) {
     const res = await fetch(`${API_BASE}/api/batches/${batchId}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
-  } catch (err) {
+  } catch (_err) {
     const all = await fetchBatches();
     const found = all.batches.find((b) => b.batch_id === Number(batchId));
     if (!found) throw new Error(`Batch ${batchId} not found`);
@@ -92,11 +82,76 @@ export async function fetchBatch(batchId) {
   }
 }
 
+// ── Merkle root computation (mirrors Python integrity/merkle.py) ──────────────
+async function sha256hex(data) {
+  const buf = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+  const digest = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function hashPair(leftHex, rightHex) {
+  const left = Uint8Array.from(leftHex.match(/.{2}/g).map(b => parseInt(b, 16)));
+  const right = Uint8Array.from(rightHex.match(/.{2}/g).map(b => parseInt(b, 16)));
+  const combined = new Uint8Array(left.length + right.length);
+  combined.set(left); combined.set(right, left.length);
+  return sha256hex(combined);
+}
+
+async function buildMerkleRoot(hashes) {
+  if (hashes.length === 0) return '0'.repeat(64);
+  if (hashes.length === 1) return hashes[0];
+  let level = [...hashes];
+  while (level.length > 1) {
+    if (level.length % 2 === 1) level.push(level[level.length - 1]);
+    const next = [];
+    for (let i = 0; i < level.length; i += 2) next.push(await hashPair(level[i], level[i + 1]));
+    level = next;
+  }
+  return level[0];
+}
+
+// ── submitBatch: auto-fills required fields if not provided ──────────────────
 export async function submitBatch(batchData) {
+  // If the caller provides raw record_hashes but not merkle_root/batch_id, compute them
+  let payload = { ...batchData };
+
+  if (!payload.merkle_root && payload.record_hashes?.length) {
+    payload.merkle_root = await buildMerkleRoot(payload.record_hashes);
+  }
+
+  if (!payload.batch_id || !payload.first_sequence) {
+    // Ask backend for latest batch to compute next id and sequence
+    let nextId = 1;
+    let firstSeq = 1;
+    let prevRoot = '0'.repeat(64);
+    try {
+      const latestRes = await fetch(`${API_BASE}/api/batches?limit=1&offset=0`);
+      if (latestRes.ok) {
+        const latestData = await latestRes.json();
+        if (latestData.batches?.length) {
+          const latest = latestData.batches[0];
+          nextId = latest.batch_id + 1;
+          firstSeq = latest.last_sequence + 1;
+          prevRoot = latest.merkle_root;
+        }
+      }
+    } catch (_) { /* use defaults */ }
+
+    const count = payload.record_hashes?.length ?? payload.record_count ?? 1;
+    payload.batch_id = payload.batch_id ?? nextId;
+    payload.previous_root = payload.previous_root ?? prevRoot;
+    payload.first_sequence = payload.first_sequence ?? firstSeq;
+    payload.last_sequence = payload.last_sequence ?? (firstSeq + count - 1);
+    payload.record_count = payload.record_count ?? count;
+  }
+
+  // Strip non-schema fields (records is just for local use)
+  const { records: _records, ...body } = payload;
+
   const res = await fetch(`${API_BASE}/api/batches`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(batchData),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -119,17 +174,17 @@ export async function verifyBatch(batchId, records = null) {
     return await res.json();
   } catch (err) {
     // If backend offline, compute simulated verification
-    const isTampered = records && records.some((r) => r.details?.tampered);
+    const isTampered = records && records.some((r) => r.details?.includes?.('TAMPERED'));
     return {
       batch_id: Number(batchId),
       verified: !isTampered,
       expected_root: "9c3e41b2f8a70512e6d9b4c3a1f8e70512e6d9b4c3a1f8e70512e6d9b4c3a1f8",
       computed_root: isTampered
-        ? "00000000000000000000000000000000000000000000000000000000tampered"
+        ? "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
         : "9c3e41b2f8a70512e6d9b4c3a1f8e70512e6d9b4c3a1f8e70512e6d9b4c3a1f8",
       record_count: records ? records.length : 5,
       errors: isTampered
-        ? ["Record sequence 1 (evt-001) tampered: hash mismatch", "Merkle root mismatch"]
+        ? ["Record seq=5 tampered: hash mismatch", "Merkle root mismatch"]
         : [],
       message: isTampered
         ? "Integrity verification failed with 2 error(s)"
@@ -138,4 +193,3 @@ export async function verifyBatch(batchId, records = null) {
     };
   }
 }
-

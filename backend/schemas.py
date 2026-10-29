@@ -15,6 +15,10 @@ class BatchCommitmentRequest(BaseModel):
     record_count: int = Field(gt=0, description="Total number of records in batch")
     timestamp: int | None = Field(default=None, description="Unix timestamp of commitment creation")
     signature: str | None = Field(default=None, description="Ed25519 signature of batch metadata")
+    record_hashes: list[str] | None = Field(
+        default=None,
+        description="Optional ordered list of 64-char leaf hashes used to build the Merkle root.",
+    )
 
     @field_validator("merkle_root", "previous_root")
     @classmethod
@@ -53,6 +57,7 @@ class BatchResponse(BaseModel):
     block_number: int | None = None
     status: str
     created_at: str
+    record_hashes_json: str | None = None
 
 
 class BatchListResponse(BaseModel):

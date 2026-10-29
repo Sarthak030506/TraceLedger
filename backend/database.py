@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS batches (
     transaction_hash TEXT,
     block_number INTEGER,
     status TEXT NOT NULL DEFAULT 'confirmed',
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    record_hashes_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS verification_logs (
@@ -44,7 +45,12 @@ def init_db(db_path: str | None = None) -> None:
     conn = sqlite3.connect(target_path)
     try:
         conn.executescript(SCHEMA_SQL)
-        conn.commit()
+        # Add column to existing DBs that pre-date this schema version
+        try:
+            conn.execute("ALTER TABLE batches ADD COLUMN record_hashes_json TEXT")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # Column already exists
     finally:
         conn.close()
 
