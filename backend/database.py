@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS verification_logs (
 
 def get_db_path(explicit_path: str | None = None) -> str:
     """Return explicit path or read from BACKEND_DB_PATH environment variable."""
+    if os.environ.get("VERCEL"):
+        return explicit_path or os.environ.get("BACKEND_DB_PATH", "/tmp/backend.db")
     return explicit_path or os.environ.get("BACKEND_DB_PATH", "data/backend.db")
 
 

@@ -9,7 +9,7 @@ from sidecar.storage import RecordStore
 from ..schemas import BatchVerifyRequest, BatchVerifyResponse
 from ..services.storage import get_batch, log_verification
 
-router = APIRouter(prefix="/api/batches", tags=["verification"])
+router = APIRouter(prefix="/batches", tags=["verification"])
 
 
 @router.post("/{batch_id}/verify", response_model=BatchVerifyResponse)

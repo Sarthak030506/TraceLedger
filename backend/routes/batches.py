@@ -6,7 +6,7 @@ from ..schemas import BatchCommitmentRequest, BatchListResponse, BatchResponse
 from ..services.blockchain import default_blockchain_service
 from ..services.storage import get_batch, get_latest_batch, list_batches, save_batch
 
-router = APIRouter(prefix="/api/batches", tags=["batches"])
+router = APIRouter(prefix="/batches", tags=["batches"])
 
 
 @router.get("", response_model=BatchListResponse)

@@ -35,10 +35,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Support both /api/batches and /batches for serverless environments
+app.include_router(batches_router, prefix="/api")
 app.include_router(batches_router)
+app.include_router(verification_router, prefix="/api")
 app.include_router(verification_router)
 
 
+@app.get("/", response_model=HealthResponse)
+@app.get("/health", response_model=HealthResponse)
 @app.get("/api/health", response_model=HealthResponse)
 def health_check():
     """Health check endpoint reporting API and blockchain connectivity."""
