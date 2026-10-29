@@ -140,11 +140,18 @@ Person 3 manages off-chain persistence, exposes FastAPI endpoints, and anchors b
 {
   "batch_id": 1,
   "merkle_root": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+  "previous_root": "0000000000000000000000000000000000000000000000000000000000000000",
+  "first_sequence": 1,
+  "last_sequence": 100,
   "record_count": 100,
   "timestamp": 1729000000,
   "signature": "ed25519_hex_or_base64_signature"
 }
 ```
+
+- **`first_sequence`**: Sequence number of the first event in the batch.
+- **`last_sequence`**: Sequence number of the last event in the batch (`last_sequence - first_sequence + 1 == record_count`).
+- **`previous_root`**: Merkle root of the immediately preceding batch (chained cryptographic history; all zeros for batch 1).
 
 ### Signature Handling & On-Chain Protection
 Signature: stored on-chain for reference only. The contract does NOT verify Ed25519; the real on-chain protection is the owner-only access control. Signature verification happens off-chain in integrity/signer.py.
@@ -158,6 +165,9 @@ Signature: stored on-chain for reference only. The contract does NOT verify Ed25
   function commitBatch(
       uint256 batchId,
       bytes32 merkleRoot,
+      bytes32 previousRoot,
+      uint256 firstSequence,
+      uint256 lastSequence,
       uint256 recordCount,
       uint256 timestamp,
       bytes calldata signature

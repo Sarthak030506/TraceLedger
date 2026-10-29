@@ -17,6 +17,82 @@ ingest_many(sample_events(), store)
 hashes = store.get_hash_records()        # <- what Person 2 consumes
 ```
 
+## Receiver
+
+The sidecar includes an authenticated HTTP event receiver built using standard library `http.server`:
+
+### Starting the Receiver
+```bash
+export SIDECAR_API_KEY="your-secret-api-key"
+python -m sidecar.receiver --db data/records.db
+```
+*(On Windows PowerShell, use `$env:SIDECAR_API_KEY="your-secret-api-key"`)*
+
+### Endpoints
+- **`GET /health`** (Public): Returns service status and stored record count.
+  ```bash
+  curl http://127.0.0.1:8001/health
+  # Response: {"status":"ok","record_count":0}
+  ```
+- **`POST /events`** (Authenticated): Accepts a single JSON event or an array of events up to 64 KB.
+  Requires the `X-API-Key` header matching `SIDECAR_API_KEY`.
+  Returns `200` with the created hash record(s), `400` on validation errors, `401` on unauthorized/bad key, `409` on duplicate `event_id`, or `413` if payload exceeds 64 KB.
+
+### Curl Example: Ingest Expense Event
+```bash
+curl -X POST http://127.0.0.1:8001/events \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-secret-api-key" \
+  -d '{
+    "event_id": "exp-001",
+    "timestamp": "2026-10-29T12:00:00Z",
+    "event_type": "expense_created",
+    "source": "expense-tracker",
+    "details": {
+      "user": "alice",
+      "category": "travel",
+      "amount_minor": 15050,
+      "currency": "USD"
+    }
+  }'
+```
+
+### Expense-Tracker Event Examples
+*(Note: Amounts must be represented as **integer minor units** e.g. cents/paise — floating-point numbers are strictly rejected by the validator to prevent representation drift.)*
+
+**1. Expense Created ($150.50):**
+```json
+{
+  "event_id": "exp-101",
+  "timestamp": "2026-10-29T14:10:00Z",
+  "event_type": "expense_created",
+  "source": "expense-tracker",
+  "details": {
+    "user": "bob",
+    "category": "meals",
+    "amount_minor": 15050,
+    "currency": "USD",
+    "merchant": "Bistro Cafe"
+  }
+}
+```
+
+**2. Expense Approved ($42.00):**
+```json
+{
+  "event_id": "exp-102",
+  "timestamp": "2026-10-29T14:25:00Z",
+  "event_type": "expense_approved",
+  "source": "expense-tracker",
+  "details": {
+    "expense_id": "exp-100",
+    "approver": "manager",
+    "amount_minor": 4200,
+    "currency": "USD"
+  }
+}
+```
+
 ## Output for Person 2
 `store.get_hash_records(start=1, end=None)` returns a list ordered by `sequence_number`:
 ```json
