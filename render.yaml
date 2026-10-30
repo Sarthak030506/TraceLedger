@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: traceledger-backend
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: RPC_URL
+        value: https://testnetrpc.mstblockchain.com
+      - key: CHAIN_ID
+        value: "91562037"
+      - key: CONTRACT_ADDRESS
+        value: "0x554472Ae6D858C68FfA4783f0fAd7C588bfB9891"
+      - key: PRIVATE_KEY
+        sync: false
