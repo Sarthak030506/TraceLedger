@@ -99,6 +99,12 @@ class BlockchainService:
         if self.rpc_url:
             try:
                 self.w3 = Web3(Web3.HTTPProvider(self.rpc_url))
+                # MST chains are proof-of-authority (long extraData)
+                try:
+                    from web3.middleware import ExtraDataToPOAMiddleware as poa
+                except ImportError:  # web3 < 7
+                    from web3.middleware import geth_poa_middleware as poa
+                self.w3.middleware_onion.inject(poa, layer=0)
                 if self.w3.is_connected() and self.contract_address:
                     checksummed = Web3.to_checksum_address(self.contract_address)
                     self.contract = self.w3.eth.contract(address=checksummed, abi=TRACELEDGER_ABI)
@@ -147,11 +153,12 @@ class BlockchainService:
                 })
 
                 signed_tx = self.w3.eth.account.sign_transaction(tx, private_key=self.private_key)
-                tx_hash = self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+                raw_tx = getattr(signed_tx, "raw_transaction", None) or signed_tx.rawTransaction
+                tx_hash = self.w3.eth.send_raw_transaction(raw_tx)
                 receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=30)
 
                 return {
-                    "transaction_hash": tx_hash.hex(),
+                    "transaction_hash": "0x" + tx_hash.hex().removeprefix("0x"),
                     "block_number": receipt.blockNumber,
                     "status": "confirmed" if receipt.status == 1 else "failed",
                 }
