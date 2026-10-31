@@ -97,7 +97,24 @@ async function hashPair(leftHex, rightHex) {
   return sha256hex(combined);
 }
 
-async function buildMerkleRoot(hashes) {
+// Canonical record form — must match sidecar/hasher.py exactly:
+// keys sorted at every level, no whitespace, non-ASCII kept as-is.
+const RECORD_FIELDS = ['event_id', 'sequence_number', 'timestamp', 'event_type', 'source', 'details'];
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export async function hashRecord(record) {
+  const data = Object.fromEntries(RECORD_FIELDS.map((k) => [k, record[k]]));
+  return sha256hex(canonicalJson(data));
+}
+
+export async function buildMerkleRoot(hashes) {
   if (hashes.length === 0) return '0'.repeat(64);
   if (hashes.length === 1) return hashes[0];
   let level = [...hashes];
@@ -185,35 +202,29 @@ export async function submitBatch(batchData) {
 }
 
 export async function verifyBatch(batchId, records = null) {
+  let res;
   try {
-    const res = await fetch(`${API_BASE}/api/batches/${batchId}/verify`, {
+    res = await fetch(`${API_BASE}/api/batches/${batchId}/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ records }),
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${res.status}`);
-    }
-    return await res.json();
-  } catch (err) {
-    // If backend offline, compute simulated verification
-    const isTampered = records && records.some((r) => r.details?.includes?.('TAMPERED'));
+  } catch (_err) {
+    // Never invent a verdict: an unreachable verifier means "not verified", not "verified".
     return {
       batch_id: Number(batchId),
-      verified: !isTampered,
-      expected_root: "9c3e41b2f8a70512e6d9b4c3a1f8e70512e6d9b4c3a1f8e70512e6d9b4c3a1f8",
-      computed_root: isTampered
-        ? "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-        : "9c3e41b2f8a70512e6d9b4c3a1f8e70512e6d9b4c3a1f8e70512e6d9b4c3a1f8",
-      record_count: records ? records.length : 5,
-      errors: isTampered
-        ? ["Record seq=5 tampered: hash mismatch", "Merkle root mismatch"]
-        : [],
-      message: isTampered
-        ? "Integrity verification failed with 2 error(s)"
-        : "Batch integrity verified successfully (Simulated)",
-      transaction_hash: "0x7f8a9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f90",
+      verified: null,
+      offline: true,
+      expected_root: '',
+      computed_root: '',
+      record_count: records ? records.length : 0,
+      errors: [],
+      message: 'Backend unreachable — verification was not performed.',
     };
   }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return await res.json();
 }

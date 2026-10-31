@@ -1,54 +1,27 @@
 import React from 'react';
-import { CheckCircle2, AlertTriangle, Clock, XCircle, ShieldCheck } from 'lucide-react';
 
-export default function StatusBadge({ status }) {
-  const normalized = (status || '').toLowerCase();
+// Monochrome pills; colour appears only as a small dot so verdicts stay legible
+// without breaking the page's colour discipline.
+const STYLES = {
+  verified:  { dot: 'bg-ok',     label: 'Verified intact' },
+  confirmed: { dot: 'bg-ink',    label: 'Anchored on-chain' },
+  tampered:  { dot: 'bg-bad',    label: 'Tampering detected' },
+  failed:    { dot: 'bg-bad',    label: 'Anchor failed' },
+  simulated: { dot: 'bg-warn',   label: 'Simulated · not on-chain', title: 'No blockchain configured: this batch was NOT anchored on-chain' },
+  offline:   { dot: 'bg-warn',   label: 'Not verified · offline' },
+  pending:   { dot: 'bg-ink/30', label: 'Pending' },
+};
 
-  switch (normalized) {
-    case 'verified':
-      return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-          <ShieldCheck className="w-3.5 h-3.5" />
-          Verified Intact
-        </span>
-      );
-    case 'confirmed':
-      return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">
-          <CheckCircle2 className="w-3.5 h-3.5" />
-          On-Chain Anchored
-        </span>
-      );
-    case 'simulated':
-      return (
-        <span
-          title="No blockchain configured: this batch was NOT anchored on-chain"
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-violet-500/15 text-violet-300 border border-violet-500/30"
-        >
-          <XCircle className="w-3.5 h-3.5" />
-          Simulated (Not On-Chain)
-        </span>
-      );
-    case 'tampered':
-      return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse">
-          <AlertTriangle className="w-3.5 h-3.5" />
-          Tampered Detected
-        </span>
-      );
-    case 'pending':
-      return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
-          <Clock className="w-3.5 h-3.5" />
-          Pending Anchor
-        </span>
-      );
-    default:
-      return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700">
-          {status}
-        </span>
-      );
-  }
+export default function StatusBadge({ status, tone = 'light' }) {
+  const key = (status || '').toLowerCase();
+  const s = STYLES[key] || { dot: 'bg-ink/30', label: status || 'Unknown' };
+  const shell = tone === 'dark'
+    ? 'border-white/15 text-paper/80'
+    : 'border-black/10 bg-white text-ink';
+  return (
+    <span title={s.title} className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[12px] font-medium ${shell}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
+      {s.label}
+    </span>
+  );
 }
-

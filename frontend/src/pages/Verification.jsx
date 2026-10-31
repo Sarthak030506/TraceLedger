@@ -1,155 +1,110 @@
 import React, { useEffect, useState } from 'react';
-import { ShieldCheck, ShieldAlert, Play, RefreshCw } from 'lucide-react';
+import { RefreshCw, ShieldCheck } from 'lucide-react';
 import { fetchBatches, verifyBatch } from '../services/api';
+import { PageHeader, Card, Verdict } from '../components/ui';
+import { Link } from '../router';
+
+const STEPS = [
+  ['Fetch the evidence', 'Raw records from the sidecar store, or the stored leaf hashes if raw logs are unavailable.'],
+  ['Re-hash everything', 'Each record is re-serialised canonically and hashed with SHA-256, then folded into a Merkle root.'],
+  ['Read the chain', 'The commitment — root, previous root, sequence range and count — is read back from the contract.'],
+  ['Report precisely', 'Altered, missing, reordered and duplicated records are named by sequence number.'],
+];
 
 export default function Verification() {
-  const [batches, setBatches]   = useState([]);
-  const [batchId, setBatchId]   = useState('');
-  const [result, setResult]     = useState(null);
-  const [loading, setLoading]   = useState(false);
+  const [batches, setBatches] = useState([]);
+  const [batchId, setBatchId] = useState('');
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [loadingBatches, setLoadingBatches] = useState(true);
 
   useEffect(() => {
-    fetchBatches()
-      .then(d => {
-        const list = d.batches || [];
+    fetchBatches(200, 0)
+      .then((d) => {
+        const list = d.is_fallback ? [] : d.batches || [];
         setBatches(list);
         if (list.length > 0) setBatchId(String(list[0].batch_id));
       })
       .finally(() => setLoadingBatches(false));
   }, []);
 
-  const runVerification = async () => {
+  const run = async () => {
     if (!batchId) return;
     setLoading(true);
     setResult(null);
+    setError(null);
     try {
-      const r = await verifyBatch(Number(batchId));
-      setResult(r);
+      setResult(await verifyBatch(Number(batchId)));
     } catch (e) {
-      setResult({ verified: false, errors: [e.message] });
+      setError(e.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const isVerified = result?.verified === true;
-
   return (
-    <div className="space-y-6 max-w-2xl">
-      <div>
-        <h1 className="text-2xl font-bold text-white">Batch Verification</h1>
-        <p className="text-gray-400 text-sm mt-1">
-          Verify that a committed batch's Merkle root matches the on-chain anchor and detect any tampering.
-        </p>
-      </div>
+    <div className="space-y-10">
+      <PageHeader
+        title="Verify a batch"
+        subtitle="Recompute a batch from its evidence and compare it with what was anchored on-chain. TraceLedger detects tampering; it cannot prevent it."
+      />
 
-      {/* Controls */}
-      <div className="glass-panel rounded-xl p-6 space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">Select Batch</label>
+      <div className="grid gap-6 lg:grid-cols-[1fr_0.8fr]">
+        <Card className="p-6 sm:p-7">
+          <label htmlFor="batch" className="label-mono text-muted-light">Batch</label>
           {loadingBatches ? (
-            <div className="text-gray-500 text-sm">Loading batches…</div>
+            <p className="mt-3 text-[14px] text-muted-light">Loading batches…</p>
           ) : batches.length === 0 ? (
-            <div className="text-gray-500 text-sm">No batches available. Submit a batch first.</div>
+            <p className="mt-3 text-[14px] text-muted-light">
+              No batches available. Anchor one in the <Link to="/app/lab" className="underline underline-offset-2">tamper lab</Link>.
+            </p>
           ) : (
             <select
+              id="batch"
               value={batchId}
-              onChange={e => { setBatchId(e.target.value); setResult(null); }}
-              className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-cyan-500/50 cursor-pointer"
+              onChange={(e) => { setBatchId(e.target.value); setResult(null); setError(null); }}
+              className="mt-3 w-full cursor-pointer appearance-none rounded-xl hairline-light bg-paper px-4 py-3 text-[15px] text-ink focus:border-ink/30 focus:outline-none"
             >
-              {batches.map(b => (
-                <option key={b.batch_id} value={b.batch_id} className="bg-gray-900">
-                  Batch #{b.batch_id} — {b.record_count ?? '?'} records
+              {batches.map((b) => (
+                <option key={b.batch_id} value={b.batch_id}>
+                  Batch #{b.batch_id} · {b.record_count ?? '?'} records
                   {b.timestamp ? ` · ${new Date(b.timestamp * 1000).toLocaleDateString()}` : ''}
                 </option>
               ))}
             </select>
           )}
-        </div>
 
-        <button
-          onClick={runVerification}
-          disabled={loading || !batchId || batches.length === 0}
-          className="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-cyan-500 text-navy-950 font-semibold text-sm hover:bg-cyan-400 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-        >
-          {loading
-            ? <><RefreshCw size={15} className="animate-spin" /> Running…</>
-            : <><Play size={15} /> Run Verification</>
-          }
-        </button>
+          <button
+            type="button"
+            onClick={run}
+            disabled={loading || !batchId}
+            className="btn-ink mt-6"
+          >
+            {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+            {loading ? 'Verifying…' : 'Run verification'}
+          </button>
+
+          {error && <p className="mt-4 text-[14px] text-bad">{error}</p>}
+        </Card>
+
+        <Card className="p-6 sm:p-7">
+          <p className="label-mono text-muted-light">How it works</p>
+          <ol className="mt-4 space-y-4">
+            {STEPS.map(([title, body], i) => (
+              <li key={title} className="flex gap-4">
+                <span className="font-mono text-[12px] text-muted-light">0{i + 1}</span>
+                <span>
+                  <span className="block text-[15px] font-medium text-ink">{title}</span>
+                  <span className="mt-0.5 block text-[13.5px] leading-[1.5] text-muted-light">{body}</span>
+                </span>
+              </li>
+            ))}
+          </ol>
+        </Card>
       </div>
 
-      {/* Result */}
-      {result && (
-        <div className={`glass-panel rounded-xl p-6 border ${isVerified ? 'border-green-500/30' : 'border-red-500/30'}`}>
-          <div className="flex items-center gap-3 mb-4">
-            {isVerified
-              ? <ShieldCheck size={28} className="text-green-400" />
-              : <ShieldAlert size={28} className="text-red-400" />
-            }
-            <div>
-              <p className={`text-lg font-bold ${isVerified ? 'text-green-300' : 'text-red-300'}`}>
-                {isVerified ? 'Verification Passed' : 'Verification Failed'}
-              </p>
-              <p className="text-gray-400 text-xs">Batch #{batchId}</p>
-            </div>
-          </div>
-
-          {/* Root comparison */}
-          {(result.expected_root || result.computed_root) && (
-            <div className="space-y-2 mb-4">
-              <div className="bg-white/5 rounded-lg p-3">
-                <p className="text-xs text-gray-500 mb-1">Expected Merkle Root (on-chain)</p>
-                <p className="font-mono text-xs text-cyan-300 break-all">{result.expected_root || '—'}</p>
-              </div>
-              <div className={`rounded-lg p-3 ${isVerified ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
-                <p className="text-xs text-gray-500 mb-1">Computed Merkle Root</p>
-                <p className={`font-mono text-xs break-all ${isVerified ? 'text-green-300' : 'text-red-300'}`}>
-                  {result.computed_root || '—'}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Errors */}
-          {result.errors && result.errors.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold text-red-400 mb-2 uppercase tracking-wider">
-                Issues Detected ({result.errors.length})
-              </p>
-              <ul className="space-y-1">
-                {result.errors.map((err, i) => (
-                  <li key={i} className="text-xs text-red-300 bg-red-500/10 rounded px-3 py-1.5 border border-red-500/20">
-                    {err}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {isVerified && (
-            <p className="text-xs text-green-400 mt-2">
-              ✓ Merkle root matches on-chain anchor. No tampering detected in this batch.
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* Info */}
-      <div className="glass-panel rounded-xl p-5 text-sm text-gray-400 space-y-2">
-        <p className="text-white font-medium text-sm">How verification works</p>
-        <ol className="list-decimal list-inside space-y-1 text-xs">
-          <li>Retrieve all records stored for the selected batch from the local database.</li>
-          <li>Recompute the Merkle root from those records using SHA-256 pair hashing.</li>
-          <li>Compare the computed root against the root anchored on the MST Blockchain.</li>
-          <li>Report any hash mismatches, missing records, reordering, or duplicates.</li>
-        </ol>
-        <p className="text-xs text-gray-500 pt-1">
-          TraceLedger <em>detects</em> tampering — it cannot prevent it. Results reflect the integrity of stored records.
-        </p>
-      </div>
+      {result && <Verdict result={result} batchId={batchId} />}
     </div>
   );
 }
-
