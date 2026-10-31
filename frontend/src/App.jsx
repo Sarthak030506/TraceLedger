@@ -18,9 +18,10 @@ const APP_PAGES = {
 function AppShell({ path }) {
   const [health, setHealth] = useState(null);
 
+  // Refresh on every page change so the status line and contract info are never stale
   useEffect(() => {
     fetchHealth().then(setHealth).catch(() => setHealth(null));
-  }, []);
+  }, [path]);
 
   const Page = APP_PAGES[path.replace(/\/+$/, '')] || Dashboard;
 

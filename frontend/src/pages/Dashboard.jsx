@@ -19,6 +19,7 @@ export function timeAgo(ts) {
 
 export default function Dashboard({ health }) {
   const [batches, setBatches] = useState([]);
+  const [total, setTotal] = useState(0);
   const [isFallback, setIsFallback] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -26,8 +27,10 @@ export default function Dashboard({ health }) {
 
   const load = async () => {
     try {
-      const data = await fetchBatches(10, 0);
+      // One source of truth: the batch list itself, never the (possibly stale) health check
+      const data = await fetchBatches(200, 0);
       setBatches(data.batches || []);
+      setTotal(data.total ?? (data.batches || []).length);
       setIsFallback(Boolean(data.is_fallback));
     } finally {
       setLoading(false);
@@ -38,9 +41,9 @@ export default function Dashboard({ health }) {
   useEffect(() => { load(); }, []);
 
   const stats = {
-    total: health?.total_batches ?? batches.length,
+    total,
     confirmed: batches.filter((b) => b.status === 'confirmed').length,
-    latest: health?.latest_batch_id ?? (batches[0]?.batch_id ?? 0),
+    latest: batches[0]?.batch_id ?? 0,
     events: batches.reduce((acc, b) => acc + (b.record_count || 0), 0),
   };
   const dash = (v) => (loading ? '…' : v);
@@ -70,7 +73,7 @@ export default function Dashboard({ health }) {
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard title="Batches" value={dash(stats.total)} subtitle="Commitments recorded" />
-        <StatCard title="Events sealed" value={dash(stats.events)} subtitle="In the batches shown" />
+        <StatCard title="Events sealed" value={dash(stats.events)} subtitle="Across all batches" />
         <StatCard title="On-chain" value={dash(stats.confirmed)} subtitle="Confirmed transactions" />
         <StatCard title="Latest" value={dash(`#${stats.latest}`)} subtitle="Most recent batch" />
       </div>
@@ -94,7 +97,7 @@ export default function Dashboard({ health }) {
           </div>
         ) : (
           <ul className="divide-y divide-black/[0.06]">
-            {batches.map((b) => (
+            {batches.slice(0, 10).map((b) => (
               <li key={b.batch_id}>
                 <button
                   type="button"
