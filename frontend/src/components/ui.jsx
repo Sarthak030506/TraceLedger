@@ -1,5 +1,37 @@
 import React, { useState } from 'react';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, ExternalLink } from 'lucide-react';
+
+// MST testnet Blockscout. Override with VITE_EXPLORER_URL if the explorer moves.
+const EXPLORER = (import.meta.env.VITE_EXPLORER_URL || 'https://testnet.mstscan.com').replace(/\/+$/, '');
+
+export const explorer = {
+  tx: (hash) => `${EXPLORER}/tx/${hash}`,
+  block: (n) => `${EXPLORER}/block/${n}`,
+  address: (addr) => `${EXPLORER}/address/${addr}`,
+};
+
+/** Link to the block explorer. Renders nothing without an href, so callers can pass
+ *  nothing for batches that are not really on-chain (simulated, or hash unknown). */
+export function ExplorerLink({ href, label, className = '' }) {
+  if (!href) return null;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      aria-label={label ? `${label} (opens block explorer)` : 'View on block explorer'}
+      title="View on MST block explorer"
+      className={`inline-flex items-center gap-1 text-muted-light transition-colors hover:text-ink ${className}`}
+    >
+      {label && <span className="underline decoration-black/20 underline-offset-2">{label}</span>}
+      <ExternalLink className="h-3.5 w-3.5" />
+    </a>
+  );
+}
+
+/** A batch is only linkable if it was really anchored (not simulated). */
+export const isOnChain = (batch) => batch?.status === 'confirmed';
 
 export function PageHeader({ title, subtitle, actions }) {
   return (
@@ -55,13 +87,16 @@ export function shortHash(h = '', n = 8) {
   return `${h.startsWith('0x') ? '0x' : ''}${raw.slice(0, n)}…${raw.slice(-n)}`;
 }
 
-export function HashField({ label, value, dark = false, onPaper = false }) {
+export function HashField({ label, value, dark = false, onPaper = false, href }) {
   const surface = dark ? 'bg-ink text-paper' : onPaper ? 'hairline-light bg-white text-ink' : 'bg-paper text-ink';
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between">
         <span className={`label-mono ${dark ? 'text-muted-dark' : 'text-muted-light'}`}>{label}</span>
-        <CopyButton text={value} />
+        <span className="flex items-center gap-3">
+          <ExplorerLink href={value ? href : null} label="Explorer" className="text-[12px]" />
+          <CopyButton text={value} />
+        </span>
       </div>
       <div className={`break-all rounded-xl px-3 py-2.5 font-mono text-[12px] ${surface}`}>
         {value || '—'}

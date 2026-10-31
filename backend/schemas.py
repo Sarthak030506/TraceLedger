@@ -86,6 +86,16 @@ class BatchListResponse(BaseModel):
     total: int
 
 
+class BatchHeadResponse(BaseModel):
+    head: BatchResponse | None = Field(
+        default=None,
+        description="Latest known batch, after importing anything newer from the chain.",
+    )
+    imported_from_chain: int = 0
+    anchor_mode: str
+    sync_error: str | None = None
+
+
 class BatchVerifyRequest(BaseModel):
     records: list[dict[str, Any]] | None = Field(
         default=None,

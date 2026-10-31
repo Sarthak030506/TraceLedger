@@ -90,6 +90,67 @@ def get_latest_batch(db_path: str | None = None) -> dict[str, Any] | None:
         conn.close()
 
 
+class DatabaseAheadOfChain(Exception):
+    """The local database holds batches the configured contract does not have."""
+
+    def __init__(self, db_latest: int, chain_latest: int):
+        super().__init__(
+            f"Local database is at batch #{db_latest} but the configured contract is at "
+            f"#{chain_latest}. The database belongs to a different contract; "
+            f"point BACKEND_DB_PATH at a fresh file or restore the matching contract."
+        )
+        self.db_latest = db_latest
+        self.chain_latest = chain_latest
+
+
+def sync_from_chain(service: Any, db_path: str | None = None) -> int:
+    """Import batches that exist on-chain but not in the local database.
+
+    The contract is the source of truth for the batch chain. A wiped or ephemeral
+    database (e.g. a free-tier host restart) must not make us try to re-submit
+    batch #1 to a contract that is already at #N. Imported rows have no leaf hashes (not
+    stored on-chain); the transaction hash is recovered from the event log when possible.
+
+    Returns the number of batches imported. No-op in simulated mode (the database
+    is the only record there). Raises AnchorError if the chain cannot be read and
+    DatabaseAheadOfChain if the database contains batches the contract lacks.
+    """
+    if service.mode not in ("live", "read_only"):
+        return 0
+
+    chain_latest = service.latest_onchain_batch_id()
+    db_latest_row = get_latest_batch(db_path)
+    db_latest = db_latest_row["batch_id"] if db_latest_row else 0
+    if db_latest > chain_latest:
+        raise DatabaseAheadOfChain(db_latest, chain_latest)
+
+    imported = 0
+    for batch_id in range(1, chain_latest + 1):
+        if get_batch(batch_id, db_path):
+            continue
+        onchain = service.get_onchain_batch(batch_id)
+        if onchain is None:
+            break
+        save_batch(
+            {
+                "batch_id": onchain["batch_id"],
+                "merkle_root": onchain["merkle_root"],
+                "previous_root": onchain["previous_root"],
+                "first_sequence": onchain["first_sequence"],
+                "last_sequence": onchain["last_sequence"],
+                "record_count": onchain["record_count"],
+                "timestamp": onchain["timestamp"],
+                "signature": onchain.get("signature") or None,
+                "transaction_hash": service.get_onchain_tx_hash(batch_id, onchain.get("block_number")),
+                "block_number": onchain.get("block_number"),
+                "status": "confirmed",
+            },
+            db_path,
+        )
+        imported += 1
+    return imported
+
+
 def log_verification(
     batch_id: int,
     verified: bool,

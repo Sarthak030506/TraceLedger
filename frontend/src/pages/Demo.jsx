@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { RotateCcw, ShieldCheck, RefreshCw, Anchor } from 'lucide-react';
-import { fetchBatches, submitBatch, verifyBatch, hashRecord, buildMerkleRoot } from '../services/api';
-import { PageHeader, Card, Notice, Verdict, shortHash } from '../components/ui';
+import { fetchHead, submitBatch, verifyBatch, hashRecord, buildMerkleRoot } from '../services/api';
+import { PageHeader, Card, Notice, Verdict, ExplorerLink, explorer, isOnChain, shortHash } from '../components/ui';
 import StatusBadge from '../components/StatusBadge';
 
 // Sample events in the real record schema, so the browser hashes exactly what the backend hashes.
@@ -92,8 +92,9 @@ export default function Demo() {
     setError(null);
     try {
       // Continue the chain from the latest committed batch
-      const latestRes = await fetchBatches(1, 0);
-      const latest = latestRes.is_fallback ? null : latestRes.batches?.[0] || null;
+      const headRes = await fetchHead();
+      if (headRes.syncError) throw new Error(headRes.syncError);
+      const latest = headRes.isFallback ? null : headRes.head;
       const firstSeq = latest ? latest.last_sequence + 1 : 1;
       const stamp = Date.now();
       const now = new Date(stamp).toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -107,7 +108,7 @@ export default function Demo() {
       const root = await buildMerkleRoot(hashes);
       setRecords(sealed);
 
-      if (latestRes.is_fallback) {
+      if (headRes.isFallback) {
         setLocalOnly(true);
         setBatch({ batch_id: null, merkle_root: root, first_sequence: firstSeq, last_sequence: firstSeq + sealed.length - 1, status: 'offline' });
         return;
@@ -204,6 +205,9 @@ export default function Demo() {
                 {batch.batch_id && <span>Batch #{batch.batch_id}</span>}
                 <span>root {shortHash(batch.merkle_root, 6)}</span>
                 <StatusBadge status={batch.status} />
+                {isOnChain(batch) && batch.transaction_hash && (
+                  <ExplorerLink href={explorer.tx(batch.transaction_hash)} label="View transaction" />
+                )}
               </span>
             )}
           </div>

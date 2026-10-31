@@ -13,7 +13,7 @@ from .routes.batches import router as batches_router
 from .routes.verification import router as verification_router
 from .schemas import HealthResponse
 from .services.blockchain import default_blockchain_service
-from .services.storage import get_latest_batch, list_batches
+from .services.storage import get_latest_batch, list_batches, sync_from_chain
 
 logger = logging.getLogger("traceledger")
 
@@ -33,6 +33,14 @@ async def lifespan(app: FastAPI):
         logger.error("Blockchain misconfigured: %s", "; ".join(default_blockchain_service.config_errors))
     elif mode == "simulated":
         logger.warning("No blockchain configured: batches will be SIMULATED, not anchored on-chain")
+    else:
+        # Best effort: a restart must never fail because the RPC is slow or down
+        try:
+            imported = sync_from_chain(default_blockchain_service)
+            if imported:
+                logger.info("Imported %d batch(es) from the chain into the local database", imported)
+        except Exception as exc:  # noqa: BLE001 - startup must not crash
+            logger.warning("Chain sync skipped at startup: %s", exc)
     yield
 
 

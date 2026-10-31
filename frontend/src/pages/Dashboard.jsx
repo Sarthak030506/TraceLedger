@@ -3,7 +3,7 @@ import { RefreshCw, ArrowUpRight } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import StatusBadge from '../components/StatusBadge';
 import BatchDetailModal from '../components/BatchDetailModal';
-import { PageHeader, Card, Notice, shortHash } from '../components/ui';
+import { PageHeader, Card, Notice, ExplorerLink, explorer, shortHash } from '../components/ui';
 import { Link } from '../router';
 import { fetchBatches } from '../services/api';
 
@@ -122,8 +122,9 @@ export default function Dashboard({ health }) {
       </Card>
 
       {health?.contract_address && !health.is_fallback && (
-        <p className="font-mono text-[12px] text-muted-light">
-          Contract {health.contract_address} · chain {health.chain_id ?? '—'} · mode {health.anchor_mode}
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[12px] text-muted-light">
+          <span>Contract {health.contract_address} · chain {health.chain_id ?? '—'} · mode {health.anchor_mode}</span>
+          <ExplorerLink href={explorer.address(health.contract_address)} label="View contract" />
         </p>
       )}
 

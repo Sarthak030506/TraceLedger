@@ -6,10 +6,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from integrity.merkle import build_merkle_tree
 from integrity.signer import commitment_signing_payload, verify_signature
-from ..schemas import BatchCommitmentRequest, BatchListResponse, BatchResponse
+from ..schemas import BatchCommitmentRequest, BatchHeadResponse, BatchListResponse, BatchResponse
 from ..security import require_write_key, signer_public_key
 from ..services.blockchain import AnchorError, default_blockchain_service
-from ..services.storage import get_batch, get_latest_batch, list_batches, save_batch
+from ..services.storage import (
+    DatabaseAheadOfChain,
+    get_batch,
+    get_latest_batch,
+    list_batches,
+    save_batch,
+    sync_from_chain,
+)
 
 router = APIRouter(prefix="/batches", tags=["batches"])
 
@@ -27,6 +34,27 @@ def get_all_batches(
     """List batches ordered by batch_id descending."""
     batches, total = list_batches(limit=limit, offset=offset)
     return BatchListResponse(batches=[BatchResponse(**b) for b in batches], total=total)
+
+
+@router.get("/head", response_model=BatchHeadResponse)
+def get_head():
+    """Latest batch to build the next commitment on, reconciled with the chain.
+
+    Declared before "/{batch_id}" so "head" is not parsed as a batch id.
+    Never fails on a chain outage: it reports the database's view plus sync_error.
+    """
+    imported, sync_error = 0, None
+    try:
+        imported = sync_from_chain(default_blockchain_service)
+    except (AnchorError, DatabaseAheadOfChain) as exc:
+        sync_error = str(exc)
+    latest = get_latest_batch()
+    return BatchHeadResponse(
+        head=BatchResponse(**latest) if latest else None,
+        imported_from_chain=imported,
+        anchor_mode=default_blockchain_service.mode,
+        sync_error=sync_error,
+    )
 
 
 @router.get("/{batch_id}", response_model=BatchResponse)
@@ -97,6 +125,15 @@ def submit_batch(req: BatchCommitmentRequest):
     _check_signature(batch_dict, timestamp_supplied)
 
     with _submit_lock:
+        # The contract is the source of truth: catch up on anything it has that this
+        # database lacks (e.g. after an ephemeral-disk reset) before checking the chain.
+        try:
+            sync_from_chain(default_blockchain_service)
+        except AnchorError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        except DatabaseAheadOfChain as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
         latest = get_latest_batch()
         expected_id = 1 if latest is None else latest["batch_id"] + 1
 

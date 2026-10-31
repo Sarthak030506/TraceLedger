@@ -212,3 +212,98 @@ def test_sequence_gap_between_batches_rejected(client):
     resp = client.post("/api/batches", json=gap)
     assert resp.status_code == 400
     assert "sequence gap" in resp.json()["detail"].lower()
+
+
+# ── 7. the chain is the source of truth for the batch sequence ──────────────
+class _FakeChain:
+    """Stands in for a live contract that already holds some batches."""
+
+    def __init__(self, batches):
+        self.batches = {b["batch_id"]: b for b in batches}
+
+    def install(self, svc, monkeypatch):
+        monkeypatch.setattr(svc, "latest_onchain_batch_id", lambda: max(self.batches, default=0))
+        monkeypatch.setattr(svc, "get_onchain_batch", lambda bid: self.batches.get(bid))
+        monkeypatch.setattr(svc, "get_onchain_tx_hash", lambda bid, block: "0x" + f"{bid:064x}")
+
+        def anchor(batch):
+            self.batches[batch["batch_id"]] = {k: batch[k] for k in (
+                "batch_id", "merkle_root", "previous_root", "first_sequence", "last_sequence", "record_count", "timestamp")}
+            return {"transaction_hash": "0x" + "ab" * 32, "block_number": 99, "status": "confirmed"}
+
+        monkeypatch.setattr(svc, "anchor_batch", anchor)
+
+
+def _onchain(bid, root, prev, first, last):
+    return {"batch_id": bid, "merkle_root": root, "previous_root": prev, "first_sequence": first,
+            "last_sequence": last, "record_count": last - first + 1, "timestamp": 1729000000 + bid,
+            "signature": "", "block_number": 100 + bid}
+
+
+def test_wiped_database_continues_from_chain(client, monkeypatch):
+    """An empty database must not try to re-submit batch #1 to a contract already at #2."""
+    svc = _go_live(monkeypatch)
+    monkeypatch.setenv("BACKEND_API_KEY", "k")
+    chain = _FakeChain([_onchain(1, "a" * 64, "0" * 64, 1, 5), _onchain(2, "b" * 64, "a" * 64, 6, 10)])
+    chain.install(svc, monkeypatch)
+    h = {"X-API-Key": "k"}
+
+    # Re-submitting #1 is correctly refused: the chain already has it
+    retry = client.post("/api/batches", json=GENESIS, headers=h)
+    assert retry.status_code == 400 and "expected 3" in retry.json()["detail"]
+
+    nxt = {"batch_id": 3, "merkle_root": "c" * 64, "previous_root": "b" * 64,
+           "first_sequence": 11, "last_sequence": 15, "record_count": 5}
+    ok = client.post("/api/batches", json=nxt, headers=h)
+    assert ok.status_code == 201 and ok.json()["status"] == "confirmed"
+
+    listed = client.get("/api/batches").json()
+    assert listed["total"] == 3
+    imported = {b["batch_id"]: b for b in listed["batches"]}
+    assert imported[1]["transaction_hash"] == "0x" + f"{1:064x}" and imported[1]["merkle_root"] == "a" * 64
+    assert imported[3]["transaction_hash"].startswith("0x")
+
+
+def test_head_endpoint_imports_and_reports(client, monkeypatch):
+    svc = _go_live(monkeypatch)
+    _FakeChain([_onchain(1, "a" * 64, "0" * 64, 1, 5)]).install(svc, monkeypatch)
+    res = client.get("/api/batches/head").json()
+    assert res["head"]["batch_id"] == 1 and res["imported_from_chain"] == 1
+    assert res["anchor_mode"] == "live" and res["sync_error"] is None
+    # Idempotent
+    assert client.get("/api/batches/head").json()["imported_from_chain"] == 0
+
+
+def test_head_endpoint_empty_when_nothing_anchored(client):
+    res = client.get("/api/batches/head").json()
+    assert res["head"] is None and res["anchor_mode"] == "simulated"
+
+
+def test_database_ahead_of_chain_is_a_conflict(client, monkeypatch):
+    """A database from another contract must not silently corrupt the chain."""
+    client.post("/api/batches", json=GENESIS)  # simulated batch #1 in the db
+    svc = _go_live(monkeypatch)
+    monkeypatch.setenv("BACKEND_API_KEY", "k")
+    _FakeChain([]).install(svc, monkeypatch)  # fresh contract at #0
+
+    nxt = {"batch_id": 2, "merkle_root": "b" * 64, "previous_root": "a" * 64,
+           "first_sequence": 6, "last_sequence": 10, "record_count": 5}
+    res = client.post("/api/batches", json=nxt, headers={"X-API-Key": "k"})
+    assert res.status_code == 409 and "different contract" in res.json()["detail"]
+
+    head = client.get("/api/batches/head").json()
+    assert "different contract" in head["sync_error"]
+
+
+def test_chain_outage_blocks_submit_but_not_reads(client, monkeypatch):
+    svc = _go_live(monkeypatch)
+    monkeypatch.setenv("BACKEND_API_KEY", "k")
+
+    def down():
+        raise AnchorError("RPC unreachable")
+
+    monkeypatch.setattr(svc, "latest_onchain_batch_id", down)
+    assert client.post("/api/batches", json=GENESIS, headers={"X-API-Key": "k"}).status_code == 502
+    assert client.get("/api/batches").status_code == 200
+    head = client.get("/api/batches/head")
+    assert head.status_code == 200 and "RPC unreachable" in head.json()["sync_error"]

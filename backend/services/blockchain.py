@@ -71,6 +71,10 @@ TRACELEDGER_ABI = [
 ]
 
 
+# keccak256 of the BatchCommitted event signature, used to find the anchoring transaction
+BATCH_COMMITTED_SIGNATURE = "BatchCommitted(uint256,bytes32,bytes32,uint256,uint256,uint256,uint256)"
+
+
 def to_bytes32(hex_str: str) -> bytes:
     """Format a 64-char hex string as 32 bytes for Solidity."""
     clean = hex_str.strip().lower()
@@ -254,6 +258,44 @@ class BlockchainService:
             "block_number": simulated_block,
             "status": "simulated",
         }
+
+    def latest_onchain_batch_id(self) -> int:
+        """Highest batch id committed on-chain (0 if none).
+
+        Raises AnchorError if the chain is configured but cannot be read.
+        """
+        if self.mode == "simulated":
+            return max(self._mock_batches, default=0)
+        if self.mode == "misconfigured":
+            raise AnchorError("Blockchain misconfigured: " + "; ".join(self.config_errors))
+        contract = self._get_contract()
+        try:
+            return int(contract.functions.latestBatchId().call())
+        except Exception as exc:
+            raise AnchorError(f"Failed to read latest batch id from chain: {exc}") from exc
+
+    def get_onchain_tx_hash(self, batch_id: int, block_number: int) -> str | None:
+        """Transaction that committed a batch, recovered from its BatchCommitted event.
+
+        Best effort (returns None on any failure): the hash is only needed to link to
+        a block explorer, never for verification.
+        """
+        if self.mode not in ("live", "read_only") or not block_number:
+            return None
+        try:
+            self._get_contract()
+            logs = self.w3.eth.get_logs({
+                "address": Web3.to_checksum_address(self.contract_address),
+                "fromBlock": int(block_number),
+                "toBlock": int(block_number),
+                "topics": [
+                    "0x" + _to_hex(Web3.keccak(text=BATCH_COMMITTED_SIGNATURE)),
+                    "0x" + int(batch_id).to_bytes(32, "big").hex(),
+                ],
+            })
+            return "0x" + _to_hex(logs[0]["transactionHash"]) if logs else None
+        except Exception:  # noqa: BLE001
+            return None
 
     def get_onchain_batch(self, batch_id: int) -> dict[str, Any] | None:
         """Fetch a batch commitment from the contract (or the simulation cache).

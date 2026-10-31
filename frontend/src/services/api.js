@@ -69,6 +69,28 @@ export async function fetchBatches(limit = 50, offset = 0) {
   }
 }
 
+/**
+ * Latest batch to build the next commitment on, reconciled with the chain by the backend.
+ * Returns { head, syncError, isFallback }. Falls back to the plain list on older backends.
+ */
+export async function fetchHead() {
+  try {
+    const res = await fetch(`${API_BASE}/api/batches/head`);
+    if (res.ok) {
+      const data = await res.json();
+      return { head: data.head, syncError: data.sync_error, isFallback: false };
+    }
+    // Older backend without /head: "head" is parsed as a batch id and rejected
+    if (res.status === 404 || res.status === 422) {
+      const list = await fetch(`${API_BASE}/api/batches?limit=1&offset=0`);
+      if (list.ok) return { head: (await list.json()).batches?.[0] || null, syncError: null, isFallback: false };
+    }
+    throw new Error(`HTTP ${res.status}`);
+  } catch (_err) {
+    return { head: null, syncError: null, isFallback: true };
+  }
+}
+
 export async function fetchBatch(batchId) {
   try {
     const res = await fetch(`${API_BASE}/api/batches/${batchId}`);

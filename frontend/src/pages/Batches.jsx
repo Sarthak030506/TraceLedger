@@ -3,7 +3,7 @@ import { RefreshCw, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fetchBatches } from '../services/api';
 import StatusBadge from '../components/StatusBadge';
 import BatchDetailModal from '../components/BatchDetailModal';
-import { PageHeader, Card, Notice, CopyButton, shortHash } from '../components/ui';
+import { PageHeader, Card, Notice, CopyButton, ExplorerLink, explorer, isOnChain, shortHash } from '../components/ui';
 import { Link } from '../router';
 
 const PAGE_SIZE = 10;
@@ -106,7 +106,10 @@ export default function Batches() {
                       <span className="inline-flex items-center gap-2">{shortHash(b.merkle_root, 6)} <CopyButton text={b.merkle_root} /></span>
                     </td>
                     <td className="px-5 py-4 font-mono text-[12.5px] text-muted-light">
-                      <span className="inline-flex items-center gap-2">{shortHash(b.transaction_hash, 6)} <CopyButton text={b.transaction_hash} /></span>
+                      <span className="inline-flex items-center gap-2">
+                        {shortHash(b.transaction_hash, 6)} <CopyButton text={b.transaction_hash} />
+                        {isOnChain(b) && <ExplorerLink href={b.transaction_hash ? explorer.tx(b.transaction_hash) : null} />}
+                      </span>
                     </td>
                     <td className="px-5 py-4"><StatusBadge status={b.status} /></td>
                   </tr>

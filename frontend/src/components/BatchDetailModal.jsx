@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, ShieldCheck, RefreshCw } from 'lucide-react';
 import StatusBadge from './StatusBadge';
-import { HashField, Verdict } from './ui';
+import { HashField, Verdict, ExplorerLink, explorer, isOnChain } from './ui';
 import { verifyBatch } from '../services/api';
 
 export default function BatchDetailModal({ batch, onClose, onVerified }) {
@@ -74,14 +74,30 @@ export default function BatchDetailModal({ batch, onClose, onVerified }) {
             {facts.map(([k, v]) => (
               <div key={k} className="rounded-xl hairline-light bg-white px-3.5 py-3">
                 <dt className="label-mono text-muted-light">{k}</dt>
-                <dd className="mt-1.5 truncate font-mono text-[13px] text-ink" title={v}>{v}</dd>
+                <dd className="mt-1.5 flex items-center gap-1.5 truncate font-mono text-[13px] text-ink" title={v}>
+                  <span className="truncate">{v}</span>
+                  {k === 'Block' && isOnChain(batch) && batch.block_number && (
+                    <ExplorerLink href={explorer.block(batch.block_number)} label="" />
+                  )}
+                </dd>
               </div>
             ))}
           </dl>
 
           <HashField onPaper label="Merkle root" value={batch.merkle_root} />
           <HashField onPaper label="Previous batch root" value={batch.previous_root} />
-          <HashField onPaper label="Transaction hash" value={batch.transaction_hash} />
+          <HashField
+            onPaper
+            label="Transaction hash"
+            value={batch.transaction_hash}
+            href={isOnChain(batch) && batch.transaction_hash ? explorer.tx(batch.transaction_hash) : null}
+          />
+          {isOnChain(batch) && !batch.transaction_hash && (
+            <p className="text-[13px] text-muted-light">
+              This batch was recovered from the chain, and its transaction hash could not be looked up.
+              Find it on the contract page in the block explorer.
+            </p>
+          )}
           {batch.signature && <HashField onPaper label="Ed25519 signature" value={batch.signature} />}
           {batch.status === 'simulated' && (
             <p className="text-[13px] text-muted-light">
