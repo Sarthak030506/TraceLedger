@@ -57,7 +57,8 @@ def test_submit_batch_lifecycle(client):
     b1 = resp1.json()
     assert b1["batch_id"] == 1
     assert b1["merkle_root"] == root1
-    assert b1["status"] == "confirmed"
+    # No blockchain configured in tests: the anchor must be labelled as simulated
+    assert b1["status"] == "simulated"
     assert b1["transaction_hash"].startswith("0x")
 
     # Submit second chained batch

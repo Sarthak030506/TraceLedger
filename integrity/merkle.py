@@ -5,6 +5,13 @@ Follows the INTERFACES.md specification:
 - Pairs: Concatenate raw 32-byte digests: SHA256(left_node_bytes + right_node_bytes).
 - Odd leaf handling: If a tree level has an odd number of nodes, duplicate the last node to form the final pair.
 - Output: merkle_root (64 hex lowercase), leaves (original list), proofs (proof path per leaf).
+
+Security note: this scheme has no leaf/node domain separation and duplicates odd nodes,
+so a root alone does not pin down the leaf count ([a, b, c] and [a, b, c, c] share a
+root). The scheme is kept as-is because roots are already anchored on-chain and the
+frontend mirrors it; instead, every verification path binds the leaf count to the
+anchored record_count / sequence range (see integrity.verifier.verify_batch and the
+backend submit/verify routes). Never accept a root without its anchored count.
 """
 import hashlib
 from typing import Any

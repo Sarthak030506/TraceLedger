@@ -11,12 +11,21 @@ from .merkle import build_merkle_tree, validate_hash_hex
 from .models import VerificationResult
 
 
-def verify_batch(records: list[dict[str, Any]], expected_root: str) -> dict[str, Any]:
+def verify_batch(
+    records: list[dict[str, Any]],
+    expected_root: str,
+    first_sequence: int | None = None,
+    last_sequence: int | None = None,
+) -> dict[str, Any]:
     """Recomputes hashes and Merkle root from retained records and verifies against expected root.
 
     Args:
         records: Ordered list of full record dictionaries (e.g. from RecordStore.get_records).
         expected_root: 64-character lowercase hex string anchored on-chain.
+        first_sequence / last_sequence: Optional anchored sequence bounds. When given, the
+            records must cover exactly this range. This binds the leaf count to the
+            commitment, which closes the odd-leaf duplication ambiguity where
+            [a, b, c] and [a, b, c, c] produce the same root.
 
     Returns:
         {
@@ -102,6 +111,20 @@ def verify_batch(records: list[dict[str, Any]], expected_root: str) -> dict[str,
                     )
         except Exception as exc:
             errors.append(f"Error hashing record at index {idx} (seq={seq}): {exc}")
+
+    if first_sequence is not None and last_sequence is not None:
+        expected_count = last_sequence - first_sequence + 1
+        if len(records) != expected_count:
+            errors.append(
+                f"Record count mismatch: commitment covers {expected_count} record(s) "
+                f"(sequence {first_sequence}-{last_sequence}), got {len(records)}"
+            )
+        seqs = [r.get("sequence_number") for r in records if isinstance(r, dict)]
+        if seqs and (seqs[0] != first_sequence or seqs[-1] != last_sequence):
+            errors.append(
+                f"Sequence range mismatch: commitment covers {first_sequence}-{last_sequence}, "
+                f"records cover {seqs[0]}-{seqs[-1]}"
+            )
 
     if len(leaf_hashes) != len(records):
         computed_root = ""

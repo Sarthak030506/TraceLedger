@@ -30,6 +30,27 @@ class BatchCommitmentRequest(BaseModel):
             raise ValueError("Root must be a 64-character hex string (SHA-256)")
         return cleaned
 
+    @field_validator("signature")
+    @classmethod
+    def validate_signature_hex(cls, v: str | None) -> str | None:
+        if v is None or v == "":
+            return None
+        cleaned = v.strip().lower().removeprefix("0x")
+        if len(cleaned) != 128 or not all(c in "0123456789abcdef" for c in cleaned):
+            raise ValueError("signature must be a 128-character hex Ed25519 signature")
+        return cleaned
+
+    @field_validator("record_hashes")
+    @classmethod
+    def validate_record_hashes(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        cleaned = [h.strip().lower() for h in v]
+        for i, h in enumerate(cleaned):
+            if len(h) != 64 or not all(c in "0123456789abcdef" for c in h):
+                raise ValueError(f"record_hashes[{i}] must be a 64-character hex string (no 0x)")
+        return cleaned
+
     @field_validator("record_count")
     @classmethod
     def validate_count_range(cls, v: int, info) -> int:
@@ -81,10 +102,24 @@ class BatchVerifyResponse(BaseModel):
     errors: list[str]
     message: str
     transaction_hash: str | None = None
+    verification_source: str = Field(
+        description=(
+            "What was re-hashed: 'provided_records' or 'sidecar_store' (raw records, strongest), "
+            "'leaf_hashes' (stored leaf hashes only; raw logs NOT checked), or 'none'."
+        )
+    )
+    onchain_checked: bool = Field(
+        description="True if the commitment was compared against the live contract."
+    )
+    signature_valid: bool | None = Field(
+        default=None,
+        description="Ed25519 check result; None when no signer public key is configured.",
+    )
 
 
 class HealthResponse(BaseModel):
     status: str
+    anchor_mode: str
     blockchain_connected: bool
     contract_address: str | None = None
     chain_id: int | None = None

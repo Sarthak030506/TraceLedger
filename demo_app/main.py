@@ -5,6 +5,7 @@ Interacts with sidecar/receiver for real-time audit logging.
 """
 from contextlib import asynccontextmanager
 import csv
+import hmac
 import io
 import os
 from pathlib import Path
@@ -25,11 +26,21 @@ from .database import (
     update_expense_amount,
 )
 
-# Hard-coded demonstration credentials
-USERS = {
-    "alice": "password123",
-    "bob": "builder456",
-}
+# Demo-only credentials. Override with DEMO_USERS="user:pass,user2:pass2".
+# The defaults exist so the local demo works out of the box; never reuse them anywhere real.
+_DEFAULT_DEMO_USERS = "alice:password123,bob:builder456"
+
+
+def _load_users() -> dict[str, str]:
+    users = {}
+    for pair in os.environ.get("DEMO_USERS", _DEFAULT_DEMO_USERS).split(","):
+        name, sep, password = pair.strip().partition(":")
+        if sep and name:
+            users[name] = password
+    return users
+
+
+USERS = _load_users()
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -81,7 +92,7 @@ def login(req: LoginRequest) -> dict[str, Any]:
     username = req.username.strip()
     expected_pass = USERS.get(username)
 
-    if expected_pass and req.password == expected_pass:
+    if expected_pass and hmac.compare_digest(req.password.encode(), expected_pass.encode()):
         # Success event
         default_auditor.emit(
             "authentication",

@@ -37,7 +37,7 @@ export async function fetchBatches(limit = 50, offset = 0) {
           merkle_root: "9c3e41b2f8a70512e6d9b4c3a1f8e70512e6d9b4c3a1f8e70512e6d9b4c3a1f8",
           previous_root: "8b2d30a1e7f60401d5c8a3b2f0e7d60401d5c8a3b2f0e7d60401d5c8a3b2f0e7",
           first_sequence: 11, last_sequence: 15, record_count: 5,
-          timestamp: 1729000200, status: "confirmed",
+          timestamp: 1729000200, status: "simulated",
           transaction_hash: "0x7f8a9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f90",
           block_number: 10003,
           created_at: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
@@ -47,7 +47,7 @@ export async function fetchBatches(limit = 50, offset = 0) {
           merkle_root: "8b2d30a1e7f60401d5c8a3b2f0e7d60401d5c8a3b2f0e7d60401d5c8a3b2f0e7",
           previous_root: "7a1c29f0d6e50390c4b792a1e9d6c50390c4b792a1e9d6c50390c4b792a1e9d6",
           first_sequence: 6, last_sequence: 10, record_count: 5,
-          timestamp: 1729000100, status: "confirmed",
+          timestamp: 1729000100, status: "simulated",
           transaction_hash: "0x6e7d8c9b0a1f2e3d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0e1d2c3b4a5f6e7d",
           block_number: 10002,
           created_at: new Date(Date.now() - 1000 * 60 * 25).toISOString(),
@@ -57,7 +57,7 @@ export async function fetchBatches(limit = 50, offset = 0) {
           merkle_root: "7a1c29f0d6e50390c4b792a1e9d6c50390c4b792a1e9d6c50390c4b792a1e9d6",
           previous_root: "0000000000000000000000000000000000000000000000000000000000000000",
           first_sequence: 1, last_sequence: 5, record_count: 5,
-          timestamp: 1729000000, status: "confirmed",
+          timestamp: 1729000000, status: "simulated",
           transaction_hash: "0x5d6c7b8a9f0e1d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0c1b2a3f4e5d6c",
           block_number: 10001,
           created_at: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
@@ -110,6 +110,16 @@ async function buildMerkleRoot(hashes) {
   return level[0];
 }
 
+const API_KEY_STORAGE = 'traceledger_api_key';
+
+function readApiKey() {
+  try { return sessionStorage.getItem(API_KEY_STORAGE); } catch (_) { return null; }
+}
+
+function storeApiKey(key) {
+  try { sessionStorage.setItem(API_KEY_STORAGE, key); } catch (_) { /* storage unavailable */ }
+}
+
 // ── submitBatch: auto-fills required fields if not provided ──────────────────
 export async function submitBatch(batchData) {
   // If the caller provides raw record_hashes but not merkle_root/batch_id, compute them
@@ -148,11 +158,25 @@ export async function submitBatch(batchData) {
   // Strip non-schema fields (records is just for local use)
   const { records: _records, ...body } = payload;
 
-  const res = await fetch(`${API_BASE}/api/batches`, {
+  const post = (apiKey) => fetch(`${API_BASE}/api/batches`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+    },
     body: JSON.stringify(body),
   });
+
+  // The operator key is never bundled into the build; it is entered once per tab.
+  let apiKey = readApiKey();
+  let res = await post(apiKey);
+  if (res.status === 401) {
+    apiKey = window.prompt('Batch submission requires the backend operator API key (X-API-Key):');
+    if (apiKey) {
+      res = await post(apiKey.trim());
+      if (res.ok) storeApiKey(apiKey.trim());
+    }
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || `Failed to submit batch: HTTP ${res.status}`);

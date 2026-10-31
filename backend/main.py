@@ -1,5 +1,6 @@
 """FastAPI application entrypoint for TraceLedger backend."""
 from contextlib import asynccontextmanager
+import logging
 import os
 
 from fastapi import FastAPI, HTTPException
@@ -14,11 +15,24 @@ from .schemas import HealthResponse
 from .services.blockchain import default_blockchain_service
 from .services.storage import get_latest_batch, list_batches
 
+logger = logging.getLogger("traceledger")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Ensure database schema is ready on startup."""
     init_db()
+    if os.environ.get("VERCEL") and not os.environ.get("BACKEND_DB_PATH"):
+        logger.warning(
+            "Batch metadata is stored in /tmp on Vercel and is lost on every cold start; "
+            "on-chain commitments remain the source of truth. Use the Render/Docker deploy "
+            "with a persistent disk for durable metadata."
+        )
+    mode = default_blockchain_service.mode
+    if mode == "misconfigured":
+        logger.error("Blockchain misconfigured: %s", "; ".join(default_blockchain_service.config_errors))
+    elif mode == "simulated":
+        logger.warning("No blockchain configured: batches will be SIMULATED, not anchored on-chain")
     yield
 
 
@@ -29,12 +43,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Comma-separated allow-list, e.g. "https://traceledger.vercel.app". Defaults to "*" for
+# local development; writes are protected by the X-API-Key header, not by cookies,
+# so credentials are never allowed cross-origin.
+cors_origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=cors_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "X-API-Key"],
 )
 
 # API routes
@@ -54,6 +73,7 @@ def health_check():
 
     return HealthResponse(
         status="ok",
+        anchor_mode=default_blockchain_service.mode,
         blockchain_connected=connected,
         contract_address=default_blockchain_service.contract_address,
         chain_id=default_blockchain_service.chain_id if connected else None,
@@ -75,11 +95,21 @@ if os.path.exists(dist_dir):
     def serve_root():
         return FileResponse(os.path.join(dist_dir, "index.html"))
 
+    dist_root = os.path.realpath(dist_dir)
+
     @app.get("/{full_path:path}")
     def serve_spa(full_path: str):
-        if full_path.startswith("api/") or full_path.startswith("batches/") or full_path == "health":
+        # Unknown API-looking paths must 404 as JSON rather than return the SPA shell
+        if full_path.split("/", 1)[0] in ("api", "batches", "health", "docs", "redoc", "openapi.json"):
             raise HTTPException(status_code=404, detail="Not Found")
-        candidate = os.path.join(dist_dir, full_path)
+        candidate = os.path.realpath(os.path.join(dist_root, full_path))
+        # Block path traversal (e.g. "..%2f..%2f.env") outside the built SPA directory
+        try:
+            inside = os.path.commonpath([dist_root, candidate]) == dist_root
+        except ValueError:  # different drive on Windows
+            inside = False
+        if not inside:
+            raise HTTPException(status_code=404, detail="Not Found")
         if os.path.isfile(candidate):
             return FileResponse(candidate)
         return FileResponse(os.path.join(dist_dir, "index.html"))

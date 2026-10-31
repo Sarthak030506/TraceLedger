@@ -19,6 +19,16 @@ export default function StatusBadge({ status }) {
           On-Chain Anchored
         </span>
       );
+    case 'simulated':
+      return (
+        <span
+          title="No blockchain configured: this batch was NOT anchored on-chain"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-violet-500/15 text-violet-300 border border-violet-500/30"
+        >
+          <XCircle className="w-3.5 h-3.5" />
+          Simulated (Not On-Chain)
+        </span>
+      );
     case 'tampered':
       return (
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse">

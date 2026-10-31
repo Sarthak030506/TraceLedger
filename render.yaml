@@ -10,6 +10,11 @@ services:
       - key: CHAIN_ID
         value: "91562037"
       - key: CONTRACT_ADDRESS
-        value: "0x554472Ae6D858C68FfA4783f0fAd7C588bfB9891"
+        value: "0xbc3Df4D18248f6c5043313b4DC78332ac635E039"
       - key: PRIVATE_KEY
+        sync: false
+      # Required in live mode: POST /api/batches is refused without it
+      - key: BACKEND_API_KEY
+        generateValue: true
+      - key: BATCH_SIGNER_PUBLIC_KEY
         sync: false

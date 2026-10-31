@@ -28,6 +28,26 @@ def generate_keypair() -> tuple[str, str]:
     return priv_bytes.hex(), pub_bytes.hex()
 
 
+COMMITMENT_SIGNED_FIELDS = (
+    "batch_id",
+    "merkle_root",
+    "previous_root",
+    "first_sequence",
+    "last_sequence",
+    "record_count",
+    "timestamp",
+)
+
+
+def commitment_signing_payload(batch: dict[str, Any]) -> dict[str, Any]:
+    """The exact subset of a batch commitment that is signed and verified.
+
+    Use this on both sides (signer and verifier) so extra fields such as
+    record_hashes, transaction_hash or status never change the signed bytes.
+    """
+    return {k: batch[k] for k in COMMITMENT_SIGNED_FIELDS}
+
+
 def canonical_batch_bytes(batch_metadata: dict[str, Any]) -> bytes:
     """Deterministically serializes batch metadata for signing.
 

@@ -81,6 +81,26 @@ def test_inline_secret_redacted():
     assert "abc123" not in d["note"]
 
 
+def test_sensitive_key_matching_is_token_based():
+    d = sanitize_details({
+        "token_count": 3, "secretary": "bob", "author": "me", "public_key": "pk",
+        "accessToken": "t", "userPassword": "p", "sessionId": "s", "private_key": "k",
+    })
+    assert d == {"token_count": 3, "secretary": "bob", "author": "me", "public_key": "pk"}
+
+
+def test_secret_shaped_values_redacted_under_any_key():
+    d = sanitize_details({"note": "used sk-live-abcdef123 and Bearer abcdefgh12345678 from AKIAABCDEFGHIJKLMNOP"})
+    for secret in ("sk-live-abcdef123", "abcdefgh12345678", "AKIAABCDEFGHIJKLMNOP"):
+        assert secret not in d["note"]
+
+
+def test_ipv6_masked_but_times_untouched():
+    assert mask_ip("2001:db8:85a3:1:2:3:4:5") == "2001:db8:85a3:1::xxx"
+    assert mask_ip("from ::1.") == "from ::xxx."
+    assert mask_ip("at 10:30:00 mac aa:bb:cc:dd:ee:ff") == "at 10:30:00 mac aa:bb:cc:dd:ee:ff"
+
+
 def test_sanitize_does_not_mutate_input():
     d = {"password": "p", "ip": "1.2.3.4"}
     before = copy.deepcopy(d)

@@ -156,6 +156,22 @@ Person 3 manages off-chain persistence, exposes FastAPI endpoints, and anchors b
 ### Signature Handling & On-Chain Protection
 Signature: stored on-chain for reference only. The contract does NOT verify Ed25519; the real on-chain protection is the owner-only access control. Signature verification happens off-chain in integrity/signer.py.
 
+- **Signed payload:** exactly the fields in `integrity.signer.COMMITMENT_SIGNED_FIELDS` (`batch_id, merkle_root, previous_root, first_sequence, last_sequence, record_count, timestamp`), built with `commitment_signing_payload(batch)` and serialized by `canonical_batch_bytes`. Sign with `sign_batch(commitment_signing_payload(batch), private_key)`.
+- **Format:** 128-char lowercase hex (64-byte Ed25519 signature), no `0x`.
+- **Enforcement:** when the backend has `BATCH_SIGNER_PUBLIC_KEY` set, `POST /batches` rejects unsigned or invalid batches (and requires an explicit `timestamp`, since it is signed), and `POST /batches/{id}/verify` re-checks the signature and reports `signature_valid`.
+
+### Write Authentication
+`POST /batches` requires the `X-API-Key` header to equal `BACKEND_API_KEY`. If `BACKEND_API_KEY` is unset, writes are allowed only in simulated mode; in live mode they are refused with 503.
+
+### Anchoring Status
+`status` is `confirmed` only for a real on-chain transaction with a successful receipt. Batches created without any blockchain configured have `status: "simulated"`. A configured chain that fails to accept the transaction returns HTTP 502 and nothing is stored.
+
+### Verification Response Additions
+- `verification_source`: `provided_records` | `sidecar_store` (raw records re-hashed) | `leaf_hashes` (only stored leaf hashes re-checked; raw logs not available) | `none`.
+- `onchain_checked`: the commitment (root, previous root, sequence range, count) was re-read from the contract and used as the expected value.
+- `signature_valid`: `true`/`false`, or `null` when no signer key is configured.
+- Records must cover exactly the anchored `first_sequence..last_sequence` range; this binds the Merkle leaf count to the commitment.
+
 ### Blockchain / Solidity Formatting Rules
 - **Hex Prefix Handling:**
   - In internal Python logic, off-chain storage, and REST API payloads: **No `0x` prefix** (lowercase 64-char hex strings).
